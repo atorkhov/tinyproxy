@@ -44,6 +44,7 @@
 #include "sock.h"
 #include "stats.h"
 #include "utils.h"
+#include "reqs.h"
 
 /*
  * Global Structures
@@ -392,6 +393,12 @@ main (int argc, char **argv)
                                 &config,
                                 &config_defaults)) {
                 exit (EX_SOFTWARE);
+        }
+
+        if (config.script_content_len || config.script_source_len) {
+                if (reqs_compile_regex() != 0) {
+                        exit (EX_SOFTWARE);
+                }
         }
 
         init_stats ();

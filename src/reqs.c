@@ -765,6 +765,68 @@ static long get_content_length (hashmap_t hashofheaders)
         return content_length;
 }
 
+/* 
+ * Insert and replace if key already exists the content_length header.
+ */
+static void set_content_length (hashmap_t hashofheaders, long content_length)
+{
+        char data[32];
+        sprintf(data, "%ld", content_length);
+
+        /* delete the content length key */
+        hashmap_remove(hashofheaders, "content-length");
+        hashmap_insert(hashofheaders, "Content-Length", data, strlen(data) + 1);
+}
+
+/* 
+ * If header is in hashmap, return value; otherwise, return NULL.
+ */
+static char * get_header (hashmap_t hashofheaders, const char * key) 
+{
+        ssize_t len;
+        char *data;
+
+        len = hashmap_entry_by_key (hashofheaders, key, (void **) &data);
+        if (len > 0)
+                return data;
+        else
+                return NULL;
+}
+
+/* test if content injection should be tested */
+static int should_inject(hashmap_t hashofheaders)
+{
+        char * content_type;
+        char * content_encoding;
+
+        /* nothing to inject */
+        if (!config.script_source_len && !config.script_content_len) 
+                return 0;
+
+        /* compressed content won't work */
+        content_encoding =  get_header(hashofheaders, "content-encoding");
+        if (content_encoding && 
+           (strstr(content_encoding, "compress") ||
+            strstr(content_encoding, "deflate") ||
+            strstr(content_encoding, "zip"))) {
+                return 0;
+        }
+
+        /* missing content type */
+        content_type = get_header(hashofheaders, "content-type");
+        if (!content_type) 
+                return 0;
+
+        if (strlen(content_type) < 9) 
+                return 0;
+
+        /* must be text/html */
+        if (strncasecmp(content_type, "text/html", 9) == 0) 
+            return 1;
+
+        return 0;
+}
+
 /*
  * Search for Via header in a hash of headers and either write a new Via
  * header, or append our information to the end of an existing Via header.
@@ -814,6 +876,177 @@ done:
         return ret;
 }
 
+/*  regexes to run */
+static const char * injection_expr [] = {   
+        "<head[^>]*>",
+        "<!doctype html>", 
+        0
+};
+
+static regex_t ** injection_regex = 0;
+
+/* 
+ * Free allocated regexes
+ */
+static void reqs_free_regex (void)
+{
+        int n = 0;
+        int i = 0;
+
+        /* count number of regex */
+        while (injection_expr[i++]) ++n;
+
+        if (injection_regex) {
+                for (i = 0; i < n; ++i) {
+                        if (injection_regex[i]) {
+                                regfree(injection_regex[i]);
+                                free(injection_regex[i]);
+                                injection_regex[i] = NULL;
+                        }
+                }
+                free(injection_regex);
+                injection_regex = 0;
+        }
+}
+
+/* 
+ * Precompile the regular expressions used to look for tags
+ */
+int reqs_compile_regex (void)
+{
+        int n = 0;
+        int i = 0;
+
+        log_message (LOG_INFO, "Compiling regexes for script injection.");
+
+        /* count number of regex */
+        while (injection_expr[i++]) ++n;
+
+        /* allocate table of regex */
+        injection_regex = (regex_t **) safemalloc(n * sizeof(regex_t *));
+        memset(injection_regex, 0, n * sizeof(regex_t *));
+
+        /* fill table with */
+        for (i = 0; i < n; ++i) {
+                injection_regex[i] = (regex_t *) safemalloc(sizeof(regex_t));
+                if (regcomp(injection_regex[i], injection_expr[i], REG_ICASE|REG_EXTENDED) != 0) {
+                        log_message (LOG_ERR, 
+                                     "Failed to compile regex '%s'!", 
+                                     injection_expr[i]);
+                        return -1;
+                }
+        }
+
+        atexit(reqs_free_regex);
+
+        return 0;
+}
+
+/* constants related to script injection */
+#define SCRIPT_SOURCE_BEG       "<script src='"
+#define SCRIPT_SOURCE_END       "' type='text/javascript'></script>"
+#define SCRIPT_CONTENT_BEG      "<script type='text/javascript'>"
+#define SCRIPT_CONTENT_END      "</script>"
+
+/* 
+ * Peek into the stream and return a new pointer to a buffer with  
+ * the updated sample of body data.  
+ */
+static int inject_script(struct conn_s * connptr, char ** content, int * content_len)
+{
+        int         buf_size = 1024;
+        char *      buf = 0;
+        int         buf_len = 0;
+        int         injected = 0;
+        int         to_move = 0;
+
+        /* don't attempt injection without a way to return content 
+           or a proper set of regexes */
+        if (!content || !content_len || !injection_regex) 
+                return 0;
+        *content = NULL; 
+        *content_len = 0;
+
+        /* make space for injected content */
+        if (config.script_source_len) {
+                to_move += sizeof(SCRIPT_SOURCE_BEG)-1;
+                to_move += config.script_source_len;
+                to_move += sizeof(SCRIPT_SOURCE_END)-1;
+        }
+        if (config.script_content_len) {
+                to_move += sizeof(SCRIPT_CONTENT_BEG)-1;
+                to_move += config.script_content_len;
+                to_move += sizeof(SCRIPT_CONTENT_END)-1;
+        }
+
+        /* allocate buffer to read the sample in.  pad with extra size in
+           case of successful injection. */
+        buf = (char *) safemalloc(buf_size + to_move);
+
+        /* read the front portion of the document  */
+        if ((buf_len = read(connptr->server_fd, buf, buf_size - 1)) > 0) {
+
+                int i = 0;
+                
+                /* regex api is dumb and assumes null terminated strings */ 
+                buf[buf_len] = 0;
+                *content = buf;
+                *content_len = buf_len; 
+
+                /* run each regex */
+                while (injection_expr[i]) {
+
+                        regmatch_t offset;
+                        if (regexec(injection_regex[i], buf, 1, &offset, 0) == 0) {
+                                
+                                log_message(LOG_INFO, 
+                                            "Pattern %s found - moving %d bytes at %d to %d to make space for injection.",
+                                            injection_expr[i],
+                                            buf_len - offset.rm_eo,
+                                            offset.rm_eo, 
+                                            offset.rm_eo + to_move);
+
+                                /* move the buffer around to make space */
+                                memmove(buf + offset.rm_eo + to_move, buf + offset.rm_eo, buf_len - offset.rm_eo);
+                                buf[buf_len + to_move] = 0;
+                                
+                                /* inject script source tag */
+                                if (config.script_source_len) {
+                                        memcpy(buf + offset.rm_eo + injected, SCRIPT_SOURCE_BEG, sizeof(SCRIPT_SOURCE_BEG)-1);
+                                        injected += sizeof(SCRIPT_SOURCE_BEG)-1;
+                                        memcpy(buf + offset.rm_eo + injected, config.script_source, config.script_source_len);
+                                        injected += config.script_source_len;
+                                        memcpy(buf + offset.rm_eo + injected, SCRIPT_SOURCE_END, sizeof(SCRIPT_SOURCE_END)-1);
+                                        injected += sizeof(SCRIPT_SOURCE_END)-1;
+                                }
+
+                                /* inject script tag with content */
+                                if (config.script_content_len) {
+                                        memcpy(buf + offset.rm_eo + injected, SCRIPT_CONTENT_BEG, sizeof(SCRIPT_CONTENT_BEG)-1);
+                                        injected += sizeof(SCRIPT_CONTENT_BEG)-1;
+                                        memcpy(buf + offset.rm_eo + injected, config.script_content, config.script_content_len);
+                                        injected += config.script_content_len;
+                                        memcpy(buf + offset.rm_eo + injected, SCRIPT_CONTENT_END, sizeof(SCRIPT_CONTENT_END)-1);
+                                        injected += sizeof(SCRIPT_CONTENT_END)-1;
+                                }
+                                
+                                /* null terminate and update content_len */
+                                buf[buf_len + injected] = 0;
+                                *content_len += injected;
+
+                                break;
+                        }
+
+                        ++i;
+                }
+        }
+        else {
+                free(buf);
+        }
+
+        return injected;
+}
+
 /*
  * Number of buckets to use internally in the hashmap.
  */
@@ -859,6 +1092,13 @@ process_client_headers (struct conn_s *connptr, hashmap_t hashofheaders)
          * to do a bit of processing.
          */
         connptr->content_length.client = get_content_length (hashofheaders);
+
+        /* if attempting script injection, remove the Accept-Encoding to avoid 
+         * gzip compression - prevents server from sending garbled gzip data.
+         */
+        if (config.script_source_len || config.script_content_len) {
+                hashmap_remove(hashofheaders, "accept-encoding");
+        }
 
         /*
          * See if there is a "Connection" header.  If so, we need to do a bit
@@ -956,6 +1196,9 @@ static int process_server_headers (struct conn_s *connptr)
         ssize_t len;
         int i;
         int ret;
+        char * body = 0;     
+        int body_len = 0;
+        int injected = 0;
 
 #ifdef REVERSE_SUPPORT
         struct reversepath *reverse = config.reversepath_list;
@@ -1027,6 +1270,32 @@ retry:
          * from it for later use.
          */
         connptr->content_length.server = get_content_length (hashofheaders);
+
+        /* perform content injection if criteria matches */
+        if (should_inject(hashofheaders)) {
+
+                /* attempt script injection */
+                injected = inject_script(connptr, &body, &body_len);
+
+                /* if injection occured and header from server had Content-Length,
+                   adjust value to account for injection */
+                if (injected) {
+
+                        if (connptr->content_length.server >= 0) {
+                        
+                                long content_len =  connptr->content_length.server + injected;
+                            
+                                log_message (LOG_INFO, 
+                                             "Adjusting Content-Length for server from %d to %d.",
+                                             connptr->content_length.server,
+                                             content_len);                            
+                                set_content_length(hashofheaders, content_len);
+                        }
+                }
+                else {
+                        log_message (LOG_INFO, "Injection attempted, not successful.");
+                }
+        }
 
         /*
          * See if there is a connection header.  If so, we need to to a bit of
@@ -1111,6 +1380,12 @@ retry:
         /* Write the final blank line to signify the end of the headers */
         if (safe_write (connptr->client_fd, "\r\n", 2) < 0)
                 return -1;
+
+        /* if the injection occured, write the body buffer to the stream as well */
+        if (body) {
+                safe_write(connptr->client_fd, body, body_len);
+                free (body);
+        }
 
         return 0;
 

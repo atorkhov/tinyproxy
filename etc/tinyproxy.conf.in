@@ -326,5 +326,15 @@ ConnectPort 563
 #
 #ReverseBaseURL "http://localhost:8888/"
 
+#
+# To include an extra script tag with the following source destination,
+# uncomment line below.  
+#
+#ScriptSource "http://localhost/inject.js"
 
+# 
+# To inlcude an extra script tag with content supplied in the following
+# file on disk, uncomment line below.
+#
+#ScriptContentPath "/var/www/inject.js"
 

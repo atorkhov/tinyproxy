@@ -110,6 +110,15 @@ struct config_s {
          * Extra headers to be added to outgoing HTTP requests.
          */
         vector_t add_headers;
+
+        /* 
+         * Script injection parameters
+         */
+        char * script_source;
+        long script_source_len;
+        char * script_content_path;
+        char * script_content;
+        long script_content_len;
 };
 
 extern int reload_config_file (const char *config_fname, struct config_s *conf,

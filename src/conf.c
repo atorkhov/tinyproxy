@@ -163,6 +163,9 @@ static HANDLE_FUNC (handle_upstream);
 static HANDLE_FUNC (handle_upstream_no);
 #endif
 
+static HANDLE_FUNC (handle_scriptsource);
+static HANDLE_FUNC (handle_scriptcontentpath);
+
 static void config_free_regex (void);
 
 /*
@@ -260,7 +263,11 @@ struct {
 #endif
         /* loglevel */
         STDCONF ("loglevel", "(critical|error|warning|notice|connect|info)",
-                 handle_loglevel)
+                 handle_loglevel),
+
+        /* script injection */
+        STDCONF ("scriptsource", STR, handle_scriptsource),
+        STDCONF ("scriptcontentpath", STR, handle_scriptcontentpath),
 };
 
 const unsigned int ndirectives = sizeof (directives) / sizeof (directives[0]);
@@ -309,6 +316,10 @@ static void free_config (struct config_s *conf)
         flush_access_list (conf->access_list);
         free_connect_ports_list (conf->connect_ports);
         hashmap_delete (conf->anonymous_map);
+
+        safefree (conf->script_source);
+        safefree (conf->script_content_path);
+        safefree (conf->script_content);
 
         memset (conf, 0, sizeof(*conf));
 }
@@ -1082,4 +1093,67 @@ static HANDLE_FUNC (handle_upstream_no)
 
         return 0;
 }
+
 #endif
+
+static HANDLE_FUNC (handle_scriptsource)
+{
+        int r = set_string_arg (&conf->script_source, line, &match[2]);
+
+        /* set script source length because it will be used a lot */
+        conf->script_source_len = 0;
+        if (r == 0 && conf->script_source) {
+                conf->script_source_len = strlen(conf->script_source);
+                log_message (LOG_INFO, 
+                             "Injection source '%s' successfully read (%d bytes)", 
+                             conf->script_source, 
+                             conf->script_source_len);
+        }
+        return r;
+}
+
+static HANDLE_FUNC (handle_scriptcontentpath)
+{
+        int r = set_string_arg (&conf->script_content_path, line, &match[2]);
+
+        conf->script_content_len = 0;
+        if (r == 0 && conf->script_content_path) {
+                FILE * f = fopen (conf->script_content_path, "r");
+                if (f) {
+                        long bufsize = 0;
+
+                        /* go to end to get */
+                        fseek(f, 0L, SEEK_END);
+
+                        /* allocate buffer */
+                        bufsize = ftell(f);
+                        conf->script_content = (char *) malloc(sizeof(char) * (bufsize + 1));
+                        conf->script_content[0] = conf->script_content[bufsize] = 0;
+
+                        /* back to front of file */
+                        fseek(f, 0L, SEEK_SET);
+
+                        /* read the entire file */
+                        if (fread(conf->script_content, sizeof(char), bufsize, f)) (void) bufsize;
+
+                        /* close file */
+                        fclose(f);
+                        
+                        conf->script_content_len = strlen(conf->script_content);
+
+                        log_message (LOG_INFO, 
+                                     "Injection script %s successfully read (%d bytes):\n%s", 
+                                     conf->script_content_path, 
+                                     conf->script_content_len,
+                                     conf->script_content);
+                }
+
+                if (!conf->script_content) {
+                        log_message (LOG_INFO, 
+                                     "Failed to read script file %s!", 
+                                     conf->script_content_path);
+                }
+        }
+
+        return r;
+}

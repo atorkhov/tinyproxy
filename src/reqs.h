@@ -45,4 +45,6 @@ struct request_s {
 
 extern void handle_connection (int fd);
 
+int reqs_compile_regex (void);
+
 #endif

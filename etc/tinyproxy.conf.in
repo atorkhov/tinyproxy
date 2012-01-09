@@ -331,10 +331,15 @@ ConnectPort 563
 # uncomment line below.  
 #
 #ScriptSource "http://localhost/inject.js"
+#
+# Source destination also could be local for every site. Then,
+# content of file ScriptContentPath will be used to serve as injected
+# script.
+#
+#ScriptSource "/_js/inject.js"
 
 # 
 # To inlcude an extra script tag with content supplied in the following
 # file on disk, uncomment line below.
 #
 #ScriptContentPath "/var/www/inject.js"
-

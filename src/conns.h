@@ -86,6 +86,10 @@ struct conn_s {
          * Pointer to upstream proxy.
          */
         struct upstream *upstream_proxy;
+
+#ifdef INJECT_SUPPORT
+        unsigned int serve_injected_script;
+#endif
 };
 
 /*

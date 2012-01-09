@@ -89,6 +89,10 @@ struct conn_s *initialize_conn (int client_fd, const char *ipaddr,
         connptr->reversepath = NULL;
 #endif
 
+#ifdef INJECT_SUPPORT
+        connptr->serve_injected_script = FALSE;
+#endif
+
         return connptr;
 
 error_exit:

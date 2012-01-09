@@ -117,9 +117,11 @@ struct config_s {
          */
         char * script_source;
         long script_source_len;
+        unsigned int script_source_local;
         char * script_content_path;
         char * script_content;
         long script_content_len;
+        time_t script_content_modified;
 #endif
 };
 

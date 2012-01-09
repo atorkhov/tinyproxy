@@ -138,6 +138,7 @@ TP_ARG_ENABLE(inject,
               [Enable content injection code (default is NO)],
               no)
 if test x"$inject_enabled" = x"yes"; then
+   ADDITIONAL_OBJECTS="$ADDITIONAL_OBJECTS tdate_parse.o"
    AC_DEFINE(INJECT_SUPPORT)
 fi
 

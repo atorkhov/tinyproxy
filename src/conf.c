@@ -78,6 +78,8 @@
 #define BEGIN "^[[:space:]]*"
 #define END "[[:space:]]*$"
 
+#define INJECT_URL "^https?://"
+
 /*
  * Limit the maximum number of substring matches to a reasonably high
  * number.  Given the usual structure of the configuration file, sixteen
@@ -1099,13 +1101,16 @@ static HANDLE_FUNC (handle_upstream_no)
 
         return 0;
 }
-
 #endif
 
 #ifdef INJECT_SUPPORT
 static HANDLE_FUNC (handle_scriptsource)
 {
         int r = set_string_arg (&conf->script_source, line, &match[2]);
+        int result;
+
+        regex_t * inject_url_regex = 0;
+        conf->script_source_local = 0;
 
         /* set script source length because it will be used a lot */
         conf->script_source_len = 0;
@@ -1115,6 +1120,27 @@ static HANDLE_FUNC (handle_scriptsource)
                              "Injection source '%s' successfully read (%d bytes)", 
                              conf->script_source, 
                              conf->script_source_len);
+
+                /* compile regex for checking */
+                inject_url_regex = (regex_t *) safemalloc(sizeof(regex_t));
+                if (regcomp(inject_url_regex, INJECT_URL, REG_ICASE|REG_EXTENDED) != 0) {
+                        log_message (LOG_ERR, 
+                                     "Failed to compile regex '%s'!", 
+                                     inject_url_regex);
+                        return -1;
+                }
+
+                /* check if inject source is local url */
+                result =
+                    regexec (inject_url_regex, conf->script_source, (size_t) 0, (regmatch_t *) 0, 0);
+
+                if (result != 0) {
+                        conf->script_source_local = 1;
+                        log_message (LOG_INFO, "Injection source is local");
+                }
+
+                free(inject_url_regex);
+                regfree(inject_url_regex);
         }
         return r;
 }
@@ -1124,10 +1150,17 @@ static HANDLE_FUNC (handle_scriptcontentpath)
         int r = set_string_arg (&conf->script_content_path, line, &match[2]);
 
         conf->script_content_len = 0;
+        conf->script_content_modified = (time_t) -1;
         if (r == 0 && conf->script_content_path) {
                 FILE * f = fopen (conf->script_content_path, "r");
                 if (f) {
                         long bufsize = 0;
+                        struct stat s;
+
+                        /* set script content modification time */
+                        if (fstat(fileno(f), &s) == 0) {
+                                conf->script_content_modified = s.st_mtime;
+                        }
 
                         /* go to end to get */
                         fseek(f, 0L, SEEK_END);

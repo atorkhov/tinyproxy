@@ -48,6 +48,9 @@
 #include "upstream.h"
 #include "connect-ports.h"
 #include "conf.h"
+#ifdef INJECT_SUPPORT
+#include "tdate_parse.h"
+#endif
 
 /*
  * Maximum length of a HTTP line
@@ -497,6 +500,17 @@ BAD_REQUEST_ERROR:
                 connptr->show_stats = TRUE;
                 goto fail;
         }
+
+#ifdef INJECT_SUPPORT
+        /*
+         * Check to see if they're requesting injected script
+         */
+        if (config.script_source_local && strcmp (config.script_source, request->path) == 0) {
+                log_message (LOG_NOTICE, "Request for the injected script.");
+                connptr->serve_injected_script = TRUE;
+                goto fail;
+        }
+#endif
 
         safefree (url);
 
@@ -1048,6 +1062,52 @@ static int inject_script(struct conn_s * connptr, char ** content, int * content
         }
 
         return injected;
+}
+
+/*
+ * Serve injected script to client as a static file.
+ */
+static int serve_injected_script (struct conn_s * connptr, hashmap_t hashofheaders)
+{
+        char *buf;
+        time_t if_modified_since = (time_t) -1;
+
+        log_message (LOG_INFO, "Serving injected script.");
+
+        /*
+         * Parsing If-Modified-Since header.
+         */
+        buf = get_header (hashofheaders, "if-modified-since");
+        if (buf) {
+                if_modified_since = tdate_parse (buf);
+                if (if_modified_since == (time_t) -1) {
+                        log_message (LOG_INFO,
+                                     "Unparseable If-Modified-Since header: %s",
+                                     buf);
+                }
+        }
+
+        /*
+         * If injected script is not newer that client asks in If-Modified-Since
+         * header, sending 304 Not Modified reply
+         */
+        if (if_modified_since != (time_t) -1 &&
+            config.script_content_modified != (time_t) -1 &&
+            if_modified_since >= config.script_content_modified) {
+                send_http_message (connptr, 304, "Not Modified", "");
+                log_message (LOG_INFO, "Injected script is cached by client.");
+                return 0;
+        }
+
+        /*
+         * Sending injected script content to client
+         */
+        if (send_http_message (connptr, 200, "OK",
+                               config.script_content) < 0) {
+                return -1;
+        }
+
+        return 0;
 }
 #endif
 
@@ -1827,6 +1887,11 @@ fail:
         } else if (connptr->show_stats) {
                 showstats (connptr);
         }
+#ifdef INJECT_SUPPORT
+          else if (connptr->serve_injected_script) {
+                serve_injected_script (connptr, hashofheaders);
+        }
+#endif
 
 done:
         free_request_struct (request);

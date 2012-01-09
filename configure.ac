@@ -131,6 +131,16 @@ if test x"$transparent_enabled" = x"yes"; then
    AC_DEFINE(TRANSPARENT_PROXY)
 fi
 
+dnl Include the content injection support
+AH_TEMPLATE([INJECT_SUPPORT],
+            [Include support for content injection.])
+TP_ARG_ENABLE(inject,
+              [Enable content injection code (default is NO)],
+              no)
+if test x"$inject_enabled" = x"yes"; then
+   AC_DEFINE(INJECT_SUPPORT)
+fi
+
 dnl Check for broken regex library
 TP_ARG_ENABLE(regexcheck,
               [Check for working regex library (default is YES)],

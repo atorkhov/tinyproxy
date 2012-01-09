@@ -163,8 +163,10 @@ static HANDLE_FUNC (handle_upstream);
 static HANDLE_FUNC (handle_upstream_no);
 #endif
 
+#ifdef INJECT_SUPPORT
 static HANDLE_FUNC (handle_scriptsource);
 static HANDLE_FUNC (handle_scriptcontentpath);
+#endif
 
 static void config_free_regex (void);
 
@@ -265,9 +267,11 @@ struct {
         STDCONF ("loglevel", "(critical|error|warning|notice|connect|info)",
                  handle_loglevel),
 
+#ifdef INJECT_SUPPORT
         /* script injection */
         STDCONF ("scriptsource", STR, handle_scriptsource),
         STDCONF ("scriptcontentpath", STR, handle_scriptcontentpath),
+#endif
 };
 
 const unsigned int ndirectives = sizeof (directives) / sizeof (directives[0]);
@@ -317,9 +321,11 @@ static void free_config (struct config_s *conf)
         free_connect_ports_list (conf->connect_ports);
         hashmap_delete (conf->anonymous_map);
 
+#ifdef INJECT_SUPPORT
         safefree (conf->script_source);
         safefree (conf->script_content_path);
         safefree (conf->script_content);
+#endif
 
         memset (conf, 0, sizeof(*conf));
 }
@@ -1096,6 +1102,7 @@ static HANDLE_FUNC (handle_upstream_no)
 
 #endif
 
+#ifdef INJECT_SUPPORT
 static HANDLE_FUNC (handle_scriptsource)
 {
         int r = set_string_arg (&conf->script_source, line, &match[2]);
@@ -1157,3 +1164,4 @@ static HANDLE_FUNC (handle_scriptcontentpath)
 
         return r;
 }
+#endif

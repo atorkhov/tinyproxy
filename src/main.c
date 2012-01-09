@@ -395,11 +395,13 @@ main (int argc, char **argv)
                 exit (EX_SOFTWARE);
         }
 
+#ifdef INJECT_SUPPORT
         if (config.script_content_len || config.script_source_len) {
                 if (reqs_compile_regex() != 0) {
                         exit (EX_SOFTWARE);
                 }
         }
+#endif
 
         init_stats ();
 

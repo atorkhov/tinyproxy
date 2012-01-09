@@ -765,6 +765,7 @@ static long get_content_length (hashmap_t hashofheaders)
         return content_length;
 }
 
+#ifdef INJECT_SUPPORT
 /* 
  * Insert and replace if key already exists the content_length header.
  */
@@ -826,6 +827,7 @@ static int should_inject(hashmap_t hashofheaders)
 
         return 0;
 }
+#endif
 
 /*
  * Search for Via header in a hash of headers and either write a new Via
@@ -876,6 +878,7 @@ done:
         return ret;
 }
 
+#ifdef INJECT_SUPPORT
 /*  regexes to run */
 static const char * injection_expr [] = {   
         "<head[^>]*>",
@@ -1046,6 +1049,7 @@ static int inject_script(struct conn_s * connptr, char ** content, int * content
 
         return injected;
 }
+#endif
 
 /*
  * Number of buckets to use internally in the hashmap.
@@ -1093,12 +1097,14 @@ process_client_headers (struct conn_s *connptr, hashmap_t hashofheaders)
          */
         connptr->content_length.client = get_content_length (hashofheaders);
 
+#ifdef INJECT_SUPPORT
         /* if attempting script injection, remove the Accept-Encoding to avoid 
          * gzip compression - prevents server from sending garbled gzip data.
          */
         if (config.script_source_len || config.script_content_len) {
                 hashmap_remove(hashofheaders, "accept-encoding");
         }
+#endif
 
         /*
          * See if there is a "Connection" header.  If so, we need to do a bit
@@ -1196,9 +1202,11 @@ static int process_server_headers (struct conn_s *connptr)
         ssize_t len;
         int i;
         int ret;
+#ifdef INJECT_SUPPORT
         char * body = 0;     
         int body_len = 0;
         int injected = 0;
+#endif
 
 #ifdef REVERSE_SUPPORT
         struct reversepath *reverse = config.reversepath_list;
@@ -1271,6 +1279,7 @@ retry:
          */
         connptr->content_length.server = get_content_length (hashofheaders);
 
+#ifdef INJECT_SUPPORT
         /* perform content injection if criteria matches */
         if (should_inject(hashofheaders)) {
 
@@ -1296,6 +1305,7 @@ retry:
                         log_message (LOG_INFO, "Injection attempted, not successful.");
                 }
         }
+#endif
 
         /*
          * See if there is a connection header.  If so, we need to to a bit of
@@ -1381,11 +1391,13 @@ retry:
         if (safe_write (connptr->client_fd, "\r\n", 2) < 0)
                 return -1;
 
+#ifdef INJECT_SUPPORT
         /* if the injection occured, write the body buffer to the stream as well */
         if (body) {
                 safe_write(connptr->client_fd, body, body_len);
                 free (body);
         }
+#endif
 
         return 0;
 

@@ -45,6 +45,8 @@ struct request_s {
 
 extern void handle_connection (int fd);
 
+#ifdef INJECT_SUPPORT
 int reqs_compile_regex (void);
+#endif
 
 #endif

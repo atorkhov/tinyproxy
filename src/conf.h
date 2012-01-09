@@ -111,6 +111,7 @@ struct config_s {
          */
         vector_t add_headers;
 
+#ifdef INJECT_SUPPORT
         /* 
          * Script injection parameters
          */
@@ -119,6 +120,7 @@ struct config_s {
         char * script_content_path;
         char * script_content;
         long script_content_len;
+#endif
 };
 
 extern int reload_config_file (const char *config_fname, struct config_s *conf,
